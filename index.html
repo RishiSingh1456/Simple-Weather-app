@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Simple Weather</title>
+  <style>
+    :root{
+      --bg1:#6ea8fe; --bg2:#3f51b5;
+      --card: rgba(255,255,255,.18);
+      --text: #fff; --muted: #e9eefc;
+      --chip:#ffffff22; --accent:#ffd54f;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;
+      color:var(--text);
+      background: linear-gradient(135deg,var(--bg1),var(--bg2));
+      min-height:100svh; display:flex; flex-direction:column; align-items:center;
+    }
+    header{font-weight:700; font-size:clamp(20px,3vw,28px); padding:24px 16px; display:flex; gap:10px; align-items:center}
+    header .pulse{width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 0 0 0 #fff;animation:pulse 2s infinite}
+    @keyframes pulse{70%{box-shadow:0 0 0 12px #ffffff00}100%{box-shadow:0 0 0 0 #ffffff00}}
+    .container{width:min(900px,92%); margin:0 auto 28px; display:grid; gap:16px}
+    .searchbar{
+      display:grid; grid-template-columns:1fr auto auto; gap:10px;
+      background:var(--card); border-radius:16px; padding:12px; backdrop-filter: blur(8px);
+    }
+    input[type="text"]{
+      border:none; outline:none; padding:12px 14px; border-radius:12px; width:100%;
+      background:#ffffffee; color:#222; font-size:16px;
+    }
+    button{
+      border:none; padding:12px 14px; border-radius:12px; font-weight:600; cursor:pointer;
+      background:var(--accent); color:#333; transition:transform .08s ease;
+    }
+    button:active{transform:translateY(1px)}
+    .ghost{background:var(--chip); color:#fff}
+    .chips{display:flex; flex-wrap:wrap; gap:8px}
+    .chip{
+      padding:8px 12px; border-radius:999px; background:var(--chip); cursor:pointer; backdrop-filter:blur(6px);
+      border:1px solid #ffffff30; font-size:14px;
+    }
+    .toggles{display:flex; gap:8px; align-items:center; justify-self:end}
+    .toggle {background:var(--chip)}
+    .card{
+      background:var(--card); border-radius:18px; padding:18px; display:grid; gap:8px;
+      box-shadow: 0 8px 24px #0000002e; backdrop-filter: blur(10px);
+      animation:fade .5s ease; min-height:160px;
+    }
+    @keyframes fade{from{opacity:0; transform: translateY(6px)} to{opacity:1; transform:none}}
+    .main{
+      display:grid; grid-template-columns: auto 1fr auto; gap:12px; align-items:center;
+    }
+    .city{font-size:clamp(18px,2.6vw,24px); font-weight:700}
+    .desc{color:var(--muted); text-transform:capitalize}
+    .temp{font-size:clamp(28px,6vw,44px); font-weight:800}
+    .meta{display:flex; gap:14px; flex-wrap:wrap; color:var(--muted); font-weight:600}
+    .meta div{background:#ffffff10; padding:8px 10px; border-radius:10px; border:1px solid #ffffff30}
+    .status{font-size:14px; color:#fff9; min-height:18px}
+    .loader{display:inline-block; width:16px; height:16px; border-radius:50%;
+      border:2px solid #fff; border-top-color:transparent; animation:spin .8s linear infinite; vertical-align:-3px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    a.small{color:#fff; opacity:.7; text-decoration:underline; font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="pulse"></div>
+    <div>🌤️ Simple Weather</div>
+  </header>
+
+  <main class="container">
+    <div class="searchbar">
+      <input id="cityInput" type="text" placeholder="Search any city… (e.g., New Delhi, London, Tokyo)"/>
+      <button id="searchBtn" title="Search">Search</button>
+      <button id="geoBtn" class="ghost" title="Use current location">📍 Use my location</button>
+      <div class="chips" style="grid-column: 1 / -1;">
+        <div class="chip">Delhi</div>
+        <div class="chip">Mumbai</div>
+        <div class="chip">Bengaluru</div>
+        <div class="chip">Kolkata</div>
+        <div class="chip">Chennai</div>
+        <div class="chip">Hyderabad</div>
+        <div class="chip">Pune</div>
+        <div class="chip">Jaipur</div>
+      </div>
+      <div class="toggles" style="grid-column: 1 / -1;">
+        <button id="unitBtn" class="toggle" title="Toggle °C/°F">Units: °C</button>
+        <span class="status" id="status"></span>
+      </div>
+    </div>
+
+    <section class="card" id="weatherCard">
+      <div class="city">Search for a city 🌍</div>
+      <div class="desc">Tip: try the chips or press Enter</div>
+    </section>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; opacity:.75">
+      <div id="lastCityInfo" class="status"></div>
+      <a class="small" href="https://openweathermap.org/api" target="_blank" rel="noopener">Powered by OpenWeather</a>
+    </div>
+  </main>
+
+  <script>
+    // ==== CONFIG ====
+    // 1) Add your OpenWeatherMap API key here
+    const apiKey = "5623b284479fd07733d64385c9a1e966";
+
+    // ==== STATE ====
+    let units = localStorage.getItem('owm_units') || 'metric'; // 'metric' or 'imperial'
+    const statusEl = document.getElementById('status');
+    const card = document.getElementById('weatherCard');
+    const unitBtn = document.getElementById('unitBtn');
+    const lastCityInfo = document.getElementById('lastCityInfo');
+
+    // Initialize UI
+    syncUnitLabel();
+    showLastCity();
+
+    // ==== HELPERS ====
+    function setStatus(msg, loading=false){
+      statusEl.innerHTML = loading ? `<span class="loader"></span> ${msg}` : msg;
+    }
+    function syncUnitLabel(){
+      unitBtn.textContent = 'Units: ' + (units === 'metric' ? '°C' : '°F');
+    }
+    function saveLast(city){
+      localStorage.setItem('last_city', city);
+      showLastCity();
+    }
+    function showLastCity(){
+      const c = localStorage.getItem('last_city');
+      lastCityInfo.textContent = c ? `Last searched: ${c}` : '';
+    }
+    function iconUrl(icon){ return `https://openweathermap.org/img/wn/${icon}@2x.png`; }
+    // Properly formats time using OpenWeather's timezone offset (in seconds)
+    function toLocalTime(ts, offset){
+      try{
+        const local = new Date((ts + offset) * 1000);
+        return local.toUTCString().match(/\d{2}:\d{2}/)[0];
+      }catch{
+        return new Date(ts*1000).toLocaleTimeString();
+      }
+    }
+
+    // ==== RENDER ====
+    function renderWeather(d){
+      const tempUnit = units === 'metric' ? '°C' : '°F';
+      const speedUnit = units === 'metric' ? 'm/s' : 'mph';
+
+      card.innerHTML = `
+        <div class="main">
+          <img src="${iconUrl(d.weather[0].icon)}" alt="${d.weather.description}" width="80" height="80" loading="eager"/>
+          <div>
+            <div class="city">${d.name}, ${d.sys?.country || ''}</div>
+            <div class="desc">${d.weather.description}</div>
+          </div>
+          <div class="temp">${Math.round(d.main.temp)}${tempUnit}</div>
+        </div>
+
+        <div class="meta">
+          <div>Feels like: <b>${Math.round(d.main.feels_like)}${tempUnit}</b></div>
+          <div>Humidity: <b>${d.main.humidity}%</b></div>
+          <div>Wind: <b>${d.wind.speed} ${speedUnit}</b></div>
+          <div>Pressure: <b>${d.main.pressure} hPa</b></div>
+          <div>Clouds: <b>${d.clouds?.all ?? 0}%</b></div>
+          <div>Sunrise: <b>${toLocalTime(d.sys.sunrise, d.timezone)}</b></div>
+          <div>Sunset: <b>${toLocalTime(d.sys.sunset, d.timezone)}</b></div>
+        </div>
+      `;
+    }
+
+    function renderError(title, detail=''){
+      card.innerHTML = `
+        <div class="city">❌ ${title}</div>
+        <div class="desc">${detail}</div>
+      `;
+    }
+
+    // ==== API CALLS ====
+    async function getByCity(city){
+      if(!apiKey || apiKey.startsWith('REPLACE_')){
+        renderError('Missing API key', 'Add your OpenWeather API key in the script.');
+        return;
+      }
+      const q = encodeURIComponent(city.trim());
+      if(!q){ return; }
+
+      setStatus('Fetching weather…', true);
+      try{
+        const url = `https://api.openweathermap.org/data/2.5/weather?q=${q}&appid=${apiKey}&units=${units}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if(!res.ok){
+          // Show the server's message (401, 404, 429, etc.)
+          const msg = (data && data.message) ? data.message : 'Request failed';
+          if(res.status === 401) renderError('Invalid API key', 'Double-check your key or wait a few minutes for activation.');
+          else if(res.status === 404) renderError('City not found', 'Try another spelling or add country (e.g., "Paris, FR").');
+          else renderError(`Error ${res.status}`, msg);
+          setStatus('');
+          return;
+        }
+
+        renderWeather(data);
+        saveLast(`${data.name}, ${data.sys?.country || ''}`);
+        setStatus('');
+      }catch(err){
+        renderError('Network error', 'Check your internet connection.');
+        setStatus('');
+      }
+    }
+
+    async function getByCoords(lat, lon){
+      if(!apiKey || apiKey.startsWith('REPLACE_')){
+        renderError('Missing API key', 'Add your OpenWeather API key in the script.');
+        return;
+      }
+      setStatus('Getting your location weather…', true);
+      try{
+        const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=${units}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if(!res.ok){
+          const msg = (data && data.message) ? data.message : 'Request failed';
+          renderError(`Error ${res.status}`, msg);
+          setStatus('');
+          return;
+        }
+
+        renderWeather(data);
+        saveLast(`${data.name}, ${data.sys?.country || ''}`);
+        setStatus('');
+      }catch(e){
+        renderError('Network error', 'Could not fetch weather for your location.');
+        setStatus('');
+      }
+    }
+
+    // ==== EVENTS ====
+    document.getElementById('searchBtn').addEventListener('click', ()=>{
+      const city = document.getElementById('cityInput').value;
+      getByCity(city);
+    });
+
+    document.getElementById('cityInput').addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter'){
+        getByCity(e.target.value);
+      }
+    });
+
+    document.querySelectorAll('.chip').forEach(ch=>{
+      ch.addEventListener('click', ()=> getByCity(ch.textContent));
+    });
+
+    document.getElementById('geoBtn').addEventListener('click', ()=>{
+      if(!('geolocation' in navigator)){
+        renderError('Geolocation not supported', 'Try searching by city instead.');
+        return;
+      }
+      setStatus('Requesting location permission…', true);
+      navigator.geolocation.getCurrentPosition(
+        (pos)=> getByCoords(pos.coords.latitude, pos.coords.longitude),
+        (err)=>{
+          renderError('Location blocked', 'Please allow location or search by city.');
+          showLastCity();
+          setStatus('');
+        },
+        {enableHighAccuracy:false, timeout:10000, maximumAge:60000}
+      );
+    });
+
+    unitBtn.addEventListener('click', ()=>{
+      units = (units === 'metric') ? 'imperial' : 'metric';
+      localStorage.setItem('owm_units', units);
+      syncUnitLabel();
+      // Re-run last search (if any)
+      const last = localStorage.getItem('last_city');
+      if(last){ getByCity(last); }
+    });
+
+    // Optional: auto-load last city on open
+    (function boot(){
+      const last = localStorage.getItem('last_city');
+      if(last) getByCity(last);
+    })();
+  </script>
+</body>
+</html>
